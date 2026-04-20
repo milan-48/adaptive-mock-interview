@@ -28,4 +28,11 @@ authRouter.post(
   authController.createPrivilegedUser,
 );
 
+authRouter.patch(
+  "/users/:userId",
+  requireAuth(),
+  requireRole("admin", "staff"),
+  authController.updateUser,
+);
+
 export default authRouter;

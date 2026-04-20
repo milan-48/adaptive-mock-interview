@@ -38,7 +38,9 @@ function LoginForm() {
 
   function goCandidate() {
     setError("");
-    router.replace("/login", { scroll: false });
+    // Explicit tab=candidate so the URL updates reliably (replace("/login") alone
+    // can leave ?tab=admin on some Next.js navigations).
+    router.replace("/login?tab=candidate", { scroll: false });
   }
 
   function goAdmin() {

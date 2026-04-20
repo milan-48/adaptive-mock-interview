@@ -207,3 +207,66 @@ export async function createUserByPrivileged(body) {
 
   return { user: toPublicUser(user) };
 }
+
+/**
+ * Admin/staff may update users. Cannot deactivate or demote the system super admin.
+ */
+export async function updateUserByPrivileged(userId, body, _actor) {
+  const target = await User.findById(userId);
+  if (!target) {
+    throw new HttpError(404, "User not found");
+  }
+
+  const superEmail = getSuperAdminEmail();
+
+  if (body.activeStatus === false && target.email === superEmail) {
+    throw new HttpError(400, "Cannot deactivate the system admin");
+  }
+
+  if (body.role !== undefined) {
+    const nr = normalizeRole(body.role);
+    if (!nr) {
+      throw new HttpError(400, "Invalid role");
+    }
+    if (nr === "admin") {
+      if (target.email !== superEmail) {
+        throw new HttpError(400, "Cannot assign admin role");
+      }
+      target.role = "admin";
+    } else {
+      if (target.email === superEmail) {
+        throw new HttpError(400, "Cannot change system admin role");
+      }
+      target.role = nr;
+    }
+  }
+
+  if (body.name !== undefined) {
+    target.name = String(body.name || "").trim();
+  }
+
+  if (body.avatarUrl !== undefined) {
+    target.avatarUrl = sanitizeAvatar(body.avatarUrl);
+  }
+
+  if (body.activeStatus !== undefined) {
+    if (target.email === superEmail && body.activeStatus === false) {
+      throw new HttpError(400, "Cannot deactivate the system admin");
+    }
+    target.activeStatus = Boolean(body.activeStatus);
+  }
+
+  const password = body.password !== undefined ? String(body.password) : "";
+  if (password) {
+    if (password.length < PASSWORD_MIN_LENGTH) {
+      throw new HttpError(
+        400,
+        `Password must be at least ${PASSWORD_MIN_LENGTH} characters`,
+      );
+    }
+    target.passwordHash = await bcrypt.hash(password, AUTH_SALT_ROUNDS);
+  }
+
+  await target.save();
+  return { user: toPublicUser(target) };
+}

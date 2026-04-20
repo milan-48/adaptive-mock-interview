@@ -70,3 +70,23 @@ export async function createPrivilegedUser(req, res) {
     return res.status(500).json({ error: "Could not create user" });
   }
 }
+
+export async function updateUser(req, res) {
+  try {
+    const result = await authService.updateUserByPrivileged(
+      req.params.userId,
+      req.body,
+      req.user,
+    );
+    return res.json(result);
+  } catch (err) {
+    if (err instanceof HttpError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    logger.error("Update user failed", {
+      message: err.message,
+      stack: err.stack,
+    });
+    return res.status(500).json({ error: "Could not update user" });
+  }
+}
