@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <defs>
+    <linearGradient id="ib" x1="16" y1="2" x2="16" y2="30" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1d61ff" />
+      <stop offset="1" stop-color="#38bdf8" />
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="9" fill="url(#ib)" />
+  <g fill="#fff">
+    <circle cx="16" cy="11.5" r="4.25" />
+    <path
+      d="M8.5 26.5c0-4.2 3.35-7.5 7.5-7.5s7.5 3.3 7.5 7.5v.5H8.5v-.5Z"
+      fill-rule="evenodd"
+    />
+  </g>
+</svg>

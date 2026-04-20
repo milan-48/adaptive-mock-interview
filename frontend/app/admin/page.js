@@ -1,16 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Pencil, Trash2 } from "lucide-react";
+import { LogIn, Pencil, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import UserDrawer from "@/components/admin/user-drawer";
 import Avatar from "@/components/admin/avatar";
 import Button from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import ConfirmDialog from "@/components/ui/confirm-dialog";
 import { EmptyState, LoadingState } from "@/components/ui/states";
+import { useAuth } from "@/context/auth-context";
 import { apiFetch } from "@/lib/api";
 
 export default function AdminCandidatesPage() {
+  const router = useRouter();
+  const { impersonateCandidate } = useAuth();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -18,6 +22,7 @@ export default function AdminCandidatesPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  const [impersonateError, setImpersonateError] = useState("");
 
   async function loadCandidates() {
     const data = await apiFetch("/v1/auth/users?role=candidate");
@@ -76,6 +81,16 @@ export default function AdminCandidatesPage() {
     }
   }
 
+  async function handleImpersonate(candidate) {
+    setImpersonateError("");
+    try {
+      await impersonateCandidate(candidate.id);
+      router.push("/dashboard");
+    } catch (e) {
+      setImpersonateError(e.message || "Could not switch into candidate account");
+    }
+  }
+
   return (
     <div className="space-y-6">
       <Card>
@@ -87,6 +102,7 @@ export default function AdminCandidatesPage() {
       </Card>
 
       {loading ? <LoadingState label="Loading candidates..." /> : null}
+      {impersonateError ? <p className="text-sm text-red-600">{impersonateError}</p> : null}
 
       {!loading && users.length === 0 ? (
         <EmptyState
@@ -112,7 +128,14 @@ export default function AdminCandidatesPage() {
                 <tr key={user.id} className="border-t border-slate-100 text-sm">
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-3">
-                      <Avatar user={user} />
+                      <button
+                        type="button"
+                        title="Switch to this candidate"
+                        className="rounded-full transition hover:opacity-85"
+                        onClick={() => handleImpersonate(user)}
+                      >
+                        <Avatar user={user} />
+                      </button>
                       <span className="font-medium text-slate-900">{user.name || "Unnamed candidate"}</span>
                     </div>
                   </td>
@@ -126,6 +149,15 @@ export default function AdminCandidatesPage() {
                   </td>
                   <td className="px-5 py-4">
                     <div className="flex items-center justify-end gap-1">
+                      <button
+                        type="button"
+                        className="rounded-lg p-2 text-[#1d4ed8] transition hover:bg-blue-50"
+                        title="Switch to candidate"
+                        aria-label={`Switch into ${user.name || user.email}`}
+                        onClick={() => handleImpersonate(user)}
+                      >
+                        <LogIn className="h-[18px] w-[18px]" strokeWidth={2} />
+                      </button>
                       <button
                         type="button"
                         className="rounded-lg p-2 text-[#2563eb] transition hover:bg-blue-50"
@@ -177,7 +209,7 @@ export default function AdminCandidatesPage() {
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}
-        title="Deactivate candidate?"
+        title={deleteTarget ? `Deactivate ${deleteTarget.name || deleteTarget.email}?` : "Deactivate candidate?"}
         message={
           deleteTarget
             ? `This will set ${deleteTarget.name || deleteTarget.email} to inactive. They will not be able to sign in until reactivated.`

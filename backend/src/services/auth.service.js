@@ -270,3 +270,26 @@ export async function updateUserByPrivileged(userId, body, _actor) {
   await target.save();
   return { user: toPublicUser(target) };
 }
+
+export async function impersonateCandidateBySuperAdmin(actor, targetUserId) {
+  if (!actor || actor.role !== "admin") {
+    throw new HttpError(403, "Only super admin can impersonate candidates");
+  }
+  if (String(actor.email || "").toLowerCase() !== getSuperAdminEmail()) {
+    throw new HttpError(403, "Only super admin can impersonate candidates");
+  }
+
+  const target = await User.findById(targetUserId);
+  if (!target) {
+    throw new HttpError(404, "User not found");
+  }
+  if (target.role !== "candidate") {
+    throw new HttpError(400, "Only candidate accounts can be impersonated");
+  }
+  if (!target.activeStatus) {
+    throw new HttpError(400, "Cannot impersonate an inactive candidate");
+  }
+
+  const token = signToken(target);
+  return { token, user: toPublicUser(target) };
+}

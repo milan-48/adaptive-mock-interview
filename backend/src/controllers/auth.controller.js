@@ -90,3 +90,22 @@ export async function updateUser(req, res) {
     return res.status(500).json({ error: "Could not update user" });
   }
 }
+
+export async function impersonateCandidate(req, res) {
+  try {
+    const result = await authService.impersonateCandidateBySuperAdmin(
+      req.user,
+      req.params.userId,
+    );
+    return res.json(result);
+  } catch (err) {
+    if (err instanceof HttpError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    logger.error("Impersonate candidate failed", {
+      message: err.message,
+      stack: err.stack,
+    });
+    return res.status(500).json({ error: "Could not impersonate candidate" });
+  }
+}

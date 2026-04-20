@@ -35,4 +35,11 @@ authRouter.patch(
   authController.updateUser,
 );
 
+authRouter.post(
+  "/users/:userId/impersonate",
+  requireAuth(),
+  requireRole("admin"),
+  authController.impersonateCandidate,
+);
+
 export default authRouter;

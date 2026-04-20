@@ -1,9 +1,11 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
+  ArrowLeftRight,
   ChevronLeft,
   ChevronRight,
   LogOut,
@@ -17,8 +19,45 @@ import Avatar from "@/components/admin/avatar";
 const EXPANDED_W = 260;
 const COLLAPSED_W = 72;
 
+function ImpersonationChipFace({ avatarUrl, size, label }) {
+  const url = String(avatarUrl || "").trim();
+  const isSm = size === "sm";
+  const box = isSm ? "h-7 w-7" : "h-9 w-9";
+  const imgPx = isSm ? 28 : 36;
+  if (url) {
+    return (
+      <div
+        className={`relative ${box} shrink-0 overflow-hidden rounded-md bg-slate-200 ring-1 ring-slate-200/80`}
+      >
+        <Image
+          src={url}
+          alt={label ? `Avatar — ${label}` : "Avatar"}
+          width={imgPx}
+          height={imgPx}
+          unoptimized
+          className="h-full w-full object-cover"
+        />
+      </div>
+    );
+  }
+  return (
+    <div
+      className={`flex ${box} shrink-0 items-center justify-center rounded-md bg-[#0f2942] text-white`}
+    >
+      <UserRound className={isSm ? "h-3.5 w-3.5" : "h-[18px] w-[18px]"} strokeWidth={2} />
+    </div>
+  );
+}
+
 /**
  * Shared app chrome: sidebar, collapse, profile — used by admin and candidate layouts.
+ */
+/**
+ * @param {object} [impersonation] Super-admin viewing as another user
+ * @param {boolean} impersonation.active
+ * @param {string} impersonation.candidateLabel — shown top-right pill
+ * @param {string} [impersonation.candidateAvatarUrl] — optional uploaded avatar
+ * @param {() => void | Promise<void>} impersonation.onSwitchToSuperAdmin
  */
 export default function AppShell({
   children,
@@ -26,6 +65,7 @@ export default function AppShell({
   collapseStorageKey,
   logoutHref,
   roleLabel,
+  impersonation = null,
 }) {
   const { user, logout } = useAuth();
   const pathname = usePathname();
@@ -61,27 +101,52 @@ export default function AppShell({
   }
 
   const sidebarW = collapsed ? COLLAPSED_W : EXPANDED_W;
+  const imp = impersonation?.active ? impersonation : null;
 
+  function normalizePath(p) {
+    if (!p || p === "/") return "/";
+    return p.replace(/\/$/, "") || "/";
+  }
+
+  /** Active nav item: exact match, or prefix match for nested routes. `/admin` is candidates only — not active on `/admin/users`. */
   function isNavActive(href) {
-    if (pathname === href) return true;
-    if (href !== "/" && pathname.startsWith(`${href}/`)) return true;
+    const p = normalizePath(pathname);
+    const h = normalizePath(href);
+    if (p === h) return true;
+    if (h === "/admin") return false;
+    if (h !== "/" && p.startsWith(`${h}/`)) return true;
     return false;
   }
 
   return (
     <div className="min-h-screen bg-[#f8fafc] text-[#1f2937] antialiased">
-      <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3.5 shadow-sm lg:hidden">
+      <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-3.5 shadow-sm lg:hidden">
         <span className="text-[17px] font-bold tracking-tight text-[#111827]">
           InterviewBrain
         </span>
-        <button
-          type="button"
-          className="rounded-lg p-2 text-slate-600 hover:bg-slate-100"
-          aria-label="Open menu"
-          onClick={() => setMobileOpen(true)}
-        >
-          <Menu className="h-5 w-5" strokeWidth={2} />
-        </button>
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+          {imp ? (
+            <div
+              className="inline-flex w-fit min-w-0 max-w-[min(18rem,calc(100%-3rem))] items-center gap-2.5 rounded-xl bg-[#f2f2f2] py-1.5 pl-1.5 pr-3"
+              title={imp.candidateLabel}
+            >
+              <ImpersonationChipFace
+                avatarUrl={imp.candidateAvatarUrl}
+                label={imp.candidateLabel}
+                size="sm"
+              />
+              <span className="truncate text-[13px] font-medium text-[#3c4858]">{imp.candidateLabel}</span>
+            </div>
+          ) : null}
+          <button
+            type="button"
+            className="shrink-0 rounded-lg p-2 text-slate-600 hover:bg-slate-100"
+            aria-label="Open menu"
+            onClick={() => setMobileOpen(true)}
+          >
+            <Menu className="h-5 w-5" strokeWidth={2} />
+          </button>
+        </div>
       </div>
 
       {mobileOpen ? (
@@ -168,6 +233,26 @@ export default function AppShell({
         </nav>
 
         <div className={`shrink-0 border-t border-slate-100 p-3 ${collapsed ? "px-2" : ""}`}>
+          {imp ? (
+            <button
+              type="button"
+              title="Switch to Super Admin"
+              onClick={() => void imp.onSwitchToSuperAdmin?.()}
+              className={`relative z-10 mb-3 flex w-full items-center rounded-[10px] font-medium text-[#374151] transition-colors hover:bg-slate-50 ${
+                collapsed ? "justify-center px-0 py-3" : "gap-3 px-3 py-3"
+              }`}
+            >
+              <ArrowLeftRight
+                className="h-[18px] w-[18px] shrink-0 text-slate-600"
+                strokeWidth={2}
+              />
+              {!collapsed ? (
+                <span className="text-left text-[15px] leading-snug tracking-tight">
+                  Switch Super Admin
+                </span>
+              ) : null}
+            </button>
+          ) : null}
           <div
             className={`rounded-xl border border-slate-200 bg-white p-3 shadow-sm ${
               collapsed ? "flex flex-col items-center gap-2" : ""
@@ -214,10 +299,32 @@ export default function AppShell({
         </div>
       </aside>
 
+      {imp ? (
+        <header
+          className="fixed right-0 top-0 z-30 hidden min-h-[72px] items-center justify-end border-b border-slate-100 bg-white px-4 sm:px-6 lg:flex"
+          style={{ left: sidebarW }}
+        >
+          {/* Same vertical rhythm as sidebar logo row (py-4 + h-10 content ≈ 72px); chip centered in this strip */}
+          <div
+            className="inline-flex w-fit max-w-[min(28rem,calc(100%-1rem))] shrink-0 items-center gap-3 rounded-xl bg-[#f2f2f2] py-2 pl-2 pr-4"
+            title={imp.candidateLabel}
+          >
+            <ImpersonationChipFace
+              avatarUrl={imp.candidateAvatarUrl}
+              label={imp.candidateLabel}
+              size="lg"
+            />
+            <span className="truncate text-[0.9375rem] font-medium leading-tight text-[#3c4858]">
+              {imp.candidateLabel}
+            </span>
+          </div>
+        </header>
+      ) : null}
+
       <main
         className={`min-h-screen px-4 py-6 transition-[margin] duration-200 ease-out sm:px-6 lg:px-8 ${
           collapsed ? "lg:ml-[72px]" : "lg:ml-[260px]"
-        }`}
+        } ${imp ? "lg:pt-[72px]" : ""}`}
       >
         {children}
       </main>
