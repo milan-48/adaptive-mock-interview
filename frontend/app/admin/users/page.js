@@ -64,7 +64,9 @@ export default function AdminUsersPage() {
 
       {!loading && users.length > 0 ? (
         <Card className="overflow-hidden p-0">
-          <table className="w-full text-left">
+          <div className="p-4">
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+              <table className="w-full text-left">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-5 py-3">User</th>
@@ -90,7 +92,9 @@ export default function AdminUsersPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+              </table>
+            </div>
+          </div>
         </Card>
       ) : null}
 

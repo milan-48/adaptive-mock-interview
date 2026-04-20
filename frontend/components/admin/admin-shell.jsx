@@ -1,12 +1,18 @@
 "use client";
 
-import { ShieldUser, Users } from "lucide-react";
+import { CalendarClock, ShieldUser, Users } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { isStaffRole } from "@/lib/auth";
 import AppShell from "@/components/layout/app-shell";
 
 const ADMIN_NAV = [
   { href: "/admin", label: "Candidates", icon: Users },
+  {
+    href: "/admin/interviews",
+    label: "Interviews",
+    icon: CalendarClock,
+    iconClass: "h-[20px] w-[20px]",
+  },
   {
     href: "/admin/users",
     label: "Users",
