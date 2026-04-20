@@ -31,5 +31,9 @@ build/
 # caches
 .cache/
 
+# uploaded files (keep uploads/.gitkeep)
+uploads/*
+!uploads/.gitkeep
+
 # editors
 .idea/

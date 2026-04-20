@@ -1,17 +1,19 @@
 import "dotenv/config";
-import cors from "cors";
-import express from "express";
+import { createApp } from "./src/app.js";
+import logger from "./src/utils/logger.js";
 
-const app = express();
 const port = Number(process.env.PORT) || 3001;
 
-app.use(cors({ origin: process.env.CORS_ORIGIN || "http://localhost:3000" }));
-app.use(express.json());
+async function start() {
+  try {
+    const app = await createApp();
+    app.listen(port, () => {
+      logger.info(`API listening on http://localhost:${port}`);
+    });
+  } catch (err) {
+    logger.error("Server failed to start", { message: err.message });
+    process.exit(1);
+  }
+}
 
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true });
-});
-
-app.listen(port, () => {
-  console.log(`API listening on http://localhost:${port}`);
-});
+start();

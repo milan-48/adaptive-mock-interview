@@ -1,8 +1,11 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f5f7fb;
+  --foreground: #0f172a;
+  --primary: #0061ff;
+  --secondary: #0ea5e9;
+  --card-bg: #ffffff;
 }
 
 @theme inline {
@@ -12,15 +15,113 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+.bg-app {
+  background: linear-gradient(180deg, #f7f9ff 0%, #f2f6fb 100%);
+}
+
+.text-display {
+  font-size: 1.875rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.text-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.text-subtitle {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.text-body {
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.card-base {
+  border: 1px solid #e2e8f0;
+  background: var(--card-bg);
+  border-radius: 16px;
+  padding: 1rem;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.btn-base {
+  border-radius: 10px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0.75rem 1rem;
+  transition: 0.2s ease;
+}
+
+.btn-primary {
+  color: #fff;
+  background: var(--primary);
+}
+
+.btn-primary:hover {
+  opacity: 0.94;
+}
+
+.btn-secondary {
+  color: #0f172a;
+  background: #eef2ff;
+  border: 1px solid #cbd5e1;
+}
+
+.btn-secondary:hover {
+  background: #e5e7eb;
+}
+
+.btn-ghost {
+  color: #334155;
+  background: transparent;
+}
+
+.btn-ghost:hover {
+  background: #f1f5f9;
+}
+
+.input {
+  width: 100%;
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  padding: 0.625rem 0.75rem;
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.input:focus {
+  border-color: #0061ff;
+  box-shadow: 0 0 0 3px rgba(0, 97, 255, 0.15);
+}
+
+.label {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 0.4rem;
+}
+
+.select-input {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%231e293b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 8 4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.85rem center;
+  background-size: 1rem 1rem;
+  padding-right: 2.4rem;
 }
