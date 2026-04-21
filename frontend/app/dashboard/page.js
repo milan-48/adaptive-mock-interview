@@ -48,7 +48,7 @@ export default function CandidateDashboardPage() {
   }, []);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pt-3 sm:pt-4">
       <Card>
         <CardHeader
           title="Interviews"
