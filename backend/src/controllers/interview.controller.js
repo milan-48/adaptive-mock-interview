@@ -95,6 +95,46 @@ export async function listMyInterviews(req, res) {
   }
 }
 
+export async function candidateTurn(req, res) {
+  try {
+    const result = await interviewService.processCandidateTurnByRoom(
+      req.user,
+      req.params.roomId,
+      req.body,
+    );
+    return res.json(result);
+  } catch (err) {
+    if (err instanceof HttpError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    logger.error("Candidate interview turn failed", {
+      message: err.message,
+      stack: err.stack,
+    });
+    return res.status(500).json({ error: "Could not process candidate turn" });
+  }
+}
+
+export async function endCandidateInterviewCall(req, res) {
+  try {
+    const result = await interviewService.endInterviewByRoomForCandidate(
+      req.user,
+      req.params.roomId,
+      req.body,
+    );
+    return res.json(result);
+  } catch (err) {
+    if (err instanceof HttpError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    logger.error("End candidate interview call failed", {
+      message: err.message,
+      stack: err.stack,
+    });
+    return res.status(500).json({ error: "Could not end interview call" });
+  }
+}
+
 export async function listInterviews(req, res) {
   try {
     const result = await interviewService.listInterviews(req.user, req.query);

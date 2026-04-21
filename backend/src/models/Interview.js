@@ -45,6 +45,7 @@ const runtimeStateSchema = new mongoose.Schema(
     abusiveLanguageCount: { type: Number, min: 0, default: 0 },
     cheatingSignalCount: { type: Number, min: 0, default: 0 },
     quitIntentCount: { type: Number, min: 0, default: 0 },
+    interviewer: { type: mongoose.Schema.Types.Mixed, default: null },
     integrityEvents: { type: [integrityEventSchema], default: [] },
     initialPromptPayload: { type: mongoose.Schema.Types.Mixed, default: null },
     currentPromptPayload: { type: mongoose.Schema.Types.Mixed, default: null },

@@ -36,6 +36,26 @@ const INTEGRITY_EVENTS_MAX = 120;
 const ALLOCATE_ROOM_MAX_ATTEMPTS = 128;
 const ABUSE_SUSPEND_THRESHOLD = 2;
 const CHEATING_SUSPEND_THRESHOLD = 2;
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+const ELEVEN_TTS_MODEL = process.env.ELEVENLABS_TTS_MODEL || "eleven_flash_v2_5";
+const ELEVEN_STT_MODEL = process.env.ELEVENLABS_STT_MODEL || "scribe_v1";
+
+const FALLBACK_INTERVIEWER_PROFILES = [
+  {
+    id: "fallback_female",
+    name: "Ava",
+    gender: "female",
+    avatarStyle: "female",
+    voiceId: process.env.ELEVENLABS_VOICE_ID_FEMALE || "",
+  },
+  {
+    id: "fallback_male",
+    name: "Liam",
+    gender: "male",
+    avatarStyle: "male",
+    voiceId: process.env.ELEVENLABS_VOICE_ID_MALE || "",
+  },
+];
 
 function sanitizeResume(value) {
   const s = String(value || "").trim();
@@ -93,6 +113,148 @@ function parseYearsOfExperience(value) {
     throw new HttpError(400, "Invalid years of experience");
   }
   return n;
+}
+
+function safeJsonParse(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function extractJsonObject(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    const parsedFence = safeJsonParse(fenced[1].trim());
+    if (parsedFence) return parsedFence;
+  }
+
+  const direct = safeJsonParse(text);
+  if (direct) return direct;
+
+  const first = text.indexOf("{");
+  const last = text.lastIndexOf("}");
+  if (first >= 0 && last > first) {
+    const sliced = text.slice(first, last + 1);
+    return safeJsonParse(sliced);
+  }
+  return null;
+}
+
+function randomItem(items) {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  return items[randomInt(0, items.length)];
+}
+
+function normalizeInterviewerGender(value) {
+  const g = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (g === "female" || g === "male" || g === "neutral") return g;
+  return "neutral";
+}
+
+function normalizeInterviewerProfile(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const voiceId = sanitizeText(raw.voiceId, 120);
+  const id = sanitizeText(raw.id || voiceId, 120);
+  const name = sanitizeText(raw.name, 120) || "AI Interviewer";
+  const gender = normalizeInterviewerGender(raw.gender);
+  const avatarStyle =
+    sanitizeText(raw.avatarStyle, 30) ||
+    (gender === "female" ? "female" : "male");
+  if (!id && !name) return null;
+  return {
+    id: id || `${avatarStyle}_${name.toLowerCase().replace(/\s+/g, "_")}`,
+    name,
+    gender,
+    avatarStyle,
+    voiceId,
+  };
+}
+
+function fallbackInterviewerProfile() {
+  const normalized = FALLBACK_INTERVIEWER_PROFILES.map((p) =>
+    normalizeInterviewerProfile(p),
+  ).filter(Boolean);
+  const picked = randomItem(normalized) || normalizeInterviewerProfile({
+    id: "fallback_ai",
+    name: "AI Interviewer",
+    gender: "neutral",
+    avatarStyle: "male",
+    voiceId: "",
+  });
+  return picked;
+}
+
+async function fetchRandomInterviewerProfileFromElevenLabs() {
+  const apiKey = String(process.env.ELEVENLABS_API_KEY || "").trim();
+  if (!apiKey) return null;
+
+  try {
+    const res = await fetch("https://api.elevenlabs.io/v1/voices", {
+      method: "GET",
+      headers: {
+        "xi-api-key": apiKey,
+      },
+    });
+    if (!res.ok) return null;
+    const payload = await res.json().catch(() => ({}));
+    const voices = Array.isArray(payload?.voices) ? payload.voices : [];
+    const mapped = voices
+      .map((v) =>
+        normalizeInterviewerProfile({
+          id: v.voice_id,
+          voiceId: v.voice_id,
+          name: v.name,
+          gender: v?.labels?.gender,
+          avatarStyle: v?.labels?.gender,
+        }),
+      )
+      .filter((v) => v && v.voiceId);
+    return randomItem(mapped);
+  } catch {
+    return null;
+  }
+}
+
+async function resolveInterviewerProfileForInterview(doc) {
+  const runtime = doc.runtimeState || {};
+  const existing = normalizeInterviewerProfile(runtime.interviewer);
+  if (existing?.voiceId) {
+    runtime.interviewer = existing;
+    doc.runtimeState = runtime;
+    return existing;
+  }
+
+  const fromApi = await fetchRandomInterviewerProfileFromElevenLabs();
+  const picked = fromApi || existing || fallbackInterviewerProfile();
+  runtime.interviewer = picked;
+  doc.runtimeState = runtime;
+  return picked;
+}
+
+function fallbackQuestionByType(interviewType) {
+  if (interviewType === "behavioral") {
+    return {
+      topic: "introduction",
+      text: "Tell me about a recent situation where you handled a difficult team challenge and what specific actions you took.",
+    };
+  }
+  if (interviewType === "system_design") {
+    return {
+      topic: "requirements",
+      text: "Design a URL shortener. Start by clarifying functional and non-functional requirements.",
+    };
+  }
+  return {
+    topic: "resume_projects",
+    text: "Walk me through one project you are most proud of, your exact role, key technical decisions, and trade-offs.",
+  };
 }
 
 /** Google Meet-style: three groups, 10 lowercase letters (e.g. kzg-jxqc-nwp). */
@@ -228,6 +390,169 @@ async function getPromptTemplateByVersion(interviewType, basePromptVersion) {
   return getOrCreateActiveBasePromptTemplate(interviewType);
 }
 
+async function callGeminiForJson(promptText) {
+  const key = String(process.env.GEMINI_API_KEY || "").trim();
+  if (!key) {
+    throw new HttpError(503, "GEMINI_API_KEY is not configured");
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    GEMINI_MODEL,
+  )}:generateContent?key=${encodeURIComponent(key)}`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: promptText }] }],
+      generationConfig: {
+        temperature: 0.4,
+        responseMimeType: "application/json",
+      },
+    }),
+  });
+
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const message =
+      payload?.error?.message || `Gemini API error (${res.status})`;
+    throw new HttpError(502, message);
+  }
+
+  const text =
+    payload?.candidates?.[0]?.content?.parts
+      ?.map((p) => p?.text || "")
+      .join("\n")
+      .trim() || "";
+  const parsed = extractJsonObject(text);
+  if (!parsed || typeof parsed !== "object") {
+    throw new HttpError(502, "Gemini response was not valid JSON");
+  }
+  return parsed;
+}
+
+async function elevenLabsTextToSpeech(text, voiceId) {
+  const apiKey = String(process.env.ELEVENLABS_API_KEY || "").trim();
+  if (!apiKey || !voiceId || !String(text || "").trim()) {
+    return null;
+  }
+
+  const res = await fetch(
+    `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(
+      voiceId,
+    )}?output_format=mp3_44100_128`,
+    {
+      method: "POST",
+      headers: {
+        "xi-api-key": apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        text,
+        model_id: ELEVEN_TTS_MODEL,
+      }),
+    },
+  );
+  if (!res.ok) {
+    return null;
+  }
+  const arr = await res.arrayBuffer();
+  return {
+    mimeType: "audio/mpeg",
+    base64: Buffer.from(arr).toString("base64"),
+  };
+}
+
+async function elevenLabsSpeechToText({
+  audioBase64,
+  mimeType = "audio/webm",
+  languageCode = "",
+}) {
+  const apiKey = String(process.env.ELEVENLABS_API_KEY || "").trim();
+  if (!apiKey || !audioBase64) return "";
+
+  const binary = Buffer.from(String(audioBase64), "base64");
+  if (!binary.length) return "";
+
+  const ext = mimeType.includes("wav")
+    ? "wav"
+    : mimeType.includes("mp3")
+      ? "mp3"
+      : mimeType.includes("ogg")
+        ? "ogg"
+        : "webm";
+
+  const form = new FormData();
+  form.append("model_id", ELEVEN_STT_MODEL);
+  if (languageCode) {
+    form.append("language_code", languageCode);
+  }
+  form.append(
+    "file",
+    new Blob([binary], { type: mimeType }),
+    `candidate-answer.${ext}`,
+  );
+
+  const res = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
+    method: "POST",
+    headers: { "xi-api-key": apiKey },
+    body: form,
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    return "";
+  }
+  return sanitizeText(payload?.text, ANSWER_MAX_LEN);
+}
+
+function fallbackAiResponse(interviewType, note = "") {
+  const q = fallbackQuestionByType(interviewType);
+  return {
+    answerEvaluation: {
+      quality: "average",
+      relevanceScore: 0,
+      clarityScore: 0,
+      technicalDepthScore: 0,
+      confidenceScore: 0,
+      notes: note || "Fallback response used",
+    },
+    interviewDecision: {
+      action: "follow_up",
+      reason: note || "Fallback response used",
+    },
+    policy: {
+      warningToCandidate: "",
+      suspendInterview: false,
+      suspendReason: "",
+      abusiveLanguageDetected: false,
+      cheatingSuspicionDetected: false,
+      quitIntentDetected: false,
+      quitConfirmed: false,
+      flags: note ? ["fallback_mode"] : [],
+    },
+    nextQuestion: q,
+    runningSummaryUpdate: "",
+  };
+}
+
+function normalizeAiResponseShape(aiResponse, interviewType) {
+  const fallback = fallbackAiResponse(interviewType);
+  const source = aiResponse && typeof aiResponse === "object" ? aiResponse : {};
+  const next = source.nextQuestion || {};
+  return {
+    answerEvaluation: source.answerEvaluation || fallback.answerEvaluation,
+    interviewDecision: source.interviewDecision || fallback.interviewDecision,
+    policy: source.policy || fallback.policy,
+    nextQuestion: {
+      topic: sanitizeText(next.topic, CONTEXT_ITEM_MAX_LEN) || fallback.nextQuestion.topic,
+      text: sanitizeText(next.text, QUESTION_MAX_LEN) || fallback.nextQuestion.text,
+    },
+    runningSummaryUpdate:
+      sanitizeText(source.runningSummaryUpdate, RUNNING_SUMMARY_MAX_LEN) ||
+      fallback.runningSummaryUpdate,
+  };
+}
+
 function ensureRuntimeStateDefaults(doc, template) {
   const runtime = doc.runtimeState || {};
   runtime.difficulty = sanitizeDifficulty(runtime.difficulty);
@@ -241,6 +566,7 @@ function ensureRuntimeStateDefaults(doc, template) {
   runtime.abusiveLanguageCount = Number(runtime.abusiveLanguageCount || 0);
   runtime.cheatingSignalCount = Number(runtime.cheatingSignalCount || 0);
   runtime.quitIntentCount = Number(runtime.quitIntentCount || 0);
+  runtime.interviewer = normalizeInterviewerProfile(runtime.interviewer);
   runtime.integrityEvents = Array.isArray(runtime.integrityEvents)
     ? runtime.integrityEvents.slice(-INTEGRITY_EVENTS_MAX)
     : [];
@@ -437,6 +763,7 @@ function toPublicInterview(doc, { includeResume = false } = {}) {
   const skills = Array.isArray(candidateContext.skills) ? candidateContext.skills : [];
   const projects = Array.isArray(candidateContext.projects) ? candidateContext.projects : [];
   const askedTopics = Array.isArray(runtimeState.askedTopics) ? runtimeState.askedTopics : [];
+  const interviewer = normalizeInterviewerProfile(runtimeState.interviewer);
   const integrityEvents = Array.isArray(runtimeState.integrityEvents)
     ? runtimeState.integrityEvents
     : [];
@@ -483,6 +810,7 @@ function toPublicInterview(doc, { includeResume = false } = {}) {
     abusiveLanguageCount: Number(runtimeState.abusiveLanguageCount || 0),
     cheatingSignalCount: Number(runtimeState.cheatingSignalCount || 0),
     quitIntentCount: Number(runtimeState.quitIntentCount || 0),
+    interviewer,
     integrityEvents,
     candidateContext: {
       resumeSummary: candidateContext.resumeSummary || "",
@@ -502,6 +830,7 @@ function toPublicInterview(doc, { includeResume = false } = {}) {
       abusiveLanguageCount: Number(runtimeState.abusiveLanguageCount || 0),
       cheatingSignalCount: Number(runtimeState.cheatingSignalCount || 0),
       quitIntentCount: Number(runtimeState.quitIntentCount || 0),
+      interviewer,
       startedAt: runtimeState.startedAt || null,
       promptGeneratedAt: runtimeState.promptGeneratedAt || null,
       initialPromptReady: Boolean(runtimeState.initialPromptPayload),
@@ -583,6 +912,7 @@ export async function startInterviewByRoomForCandidate(actor, rawRoomId) {
   );
 
   ensureRuntimeStateDefaults(doc, template);
+  const selectedInterviewer = await resolveInterviewerProfileForInterview(doc);
   if (!doc.runtimeState.startedAt) {
     doc.runtimeState.startedAt = new Date();
   }
@@ -599,8 +929,130 @@ export async function startInterviewByRoomForCandidate(actor, rawRoomId) {
       template,
     });
   doc.runtimeState.initialPromptPayload = initialPayload;
-  doc.runtimeState.currentPromptPayload = initialPayload;
+  if (!doc.runtimeState.lastQuestion) {
+    let firstAiResponse;
+    try {
+      firstAiResponse = await callGeminiForJson(buildGeminiPromptText(initialPayload));
+    } catch (err) {
+      firstAiResponse = fallbackAiResponse(
+        doc.interviewType,
+        err?.message || "Gemini unavailable",
+      );
+    }
+    const normalizedFirstResponse = normalizeAiResponseShape(
+      firstAiResponse,
+      doc.interviewType,
+    );
 
+    doc.runtimeState.currentQuestionNumber = 1;
+    doc.runtimeState.lastCandidateAnswer = "";
+    doc.runtimeState.lastQuestion = normalizedFirstResponse.nextQuestion.text;
+    doc.runtimeState.askedTopics = addUniqueString(
+      doc.runtimeState.askedTopics,
+      normalizedFirstResponse.nextQuestion.topic,
+      ASKED_TOPICS_MAX,
+    );
+    if (normalizedFirstResponse.runningSummaryUpdate) {
+      doc.runtimeState.runningSummary = sanitizeText(
+        normalizedFirstResponse.runningSummaryUpdate,
+        RUNNING_SUMMARY_MAX_LEN,
+      );
+    }
+
+    const nextPayload = buildNextTurnPromptPayload({
+      interview: doc,
+      candidateAnswer: "",
+      template,
+    });
+    doc.runtimeState.currentPromptPayload = nextPayload;
+  }
+
+  await doc.save();
+
+  const populated = await Interview.findById(doc._id)
+    .populate("candidateId", "email name avatarUrl")
+    .populate("scheduledById", "email name")
+    .exec();
+
+  const interviewer =
+    normalizeInterviewerProfile(populated?.runtimeState?.interviewer) ||
+    selectedInterviewer ||
+    fallbackInterviewerProfile();
+  const initialQuestion = sanitizeText(
+    populated.runtimeState?.lastQuestion,
+    QUESTION_MAX_LEN,
+  );
+  const ttsAudio = await elevenLabsTextToSpeech(
+    initialQuestion,
+    interviewer.voiceId,
+  );
+
+  return {
+    interview: toPublicInterview(populated, { includeResume: false }),
+    interviewer: {
+      id: interviewer.id,
+      name: interviewer.name,
+      gender: interviewer.gender,
+      avatarStyle: interviewer.avatarStyle,
+      voiceEnabled: Boolean(interviewer.voiceId),
+    },
+    initialPromptPayload: populated.runtimeState?.initialPromptPayload || initialPayload,
+    currentPromptPayload: populated.runtimeState?.currentPromptPayload || null,
+    question: {
+      topic: populated.runtimeState?.askedTopics?.slice(-1)[0] || "",
+      text: initialQuestion,
+    },
+    audio: ttsAudio,
+    finalPrompt: buildGeminiPromptText(
+      populated.runtimeState?.initialPromptPayload || initialPayload,
+    ),
+    promptMeta: {
+      interviewType: template.interviewType,
+      basePromptKey: template.key,
+      basePromptVersion: template.version,
+      maxQuestions: template.maxQuestions,
+      allowedTopics: template.allowedTopics,
+    },
+  };
+}
+
+export async function endInterviewByRoomForCandidate(actor, rawRoomId, body = {}) {
+  const doc = await getCandidateInterviewByRoom(actor, rawRoomId);
+  if (doc.status === "completed") {
+    return {
+      interview: toPublicInterview(doc, { includeResume: false }),
+      ended: true,
+    };
+  }
+
+  const template = await getPromptTemplateByVersion(
+    doc.interviewType,
+    doc.basePromptVersion,
+  );
+  ensureRuntimeStateDefaults(doc, template);
+
+  if (!doc.runtimeState.startedAt) {
+    doc.runtimeState.startedAt = new Date();
+  }
+
+  const endReason =
+    sanitizeText(body?.reason, POLICY_REASON_MAX_LEN) ||
+    "Candidate ended the call intentionally";
+
+  pushIntegrityEvent(doc.runtimeState, {
+    type: "candidate_ended_call",
+    severity: "info",
+    note: endReason,
+  });
+
+  if (!doc.runtimeState.runningSummary) {
+    doc.runtimeState.runningSummary = sanitizeText(
+      `Interview ended by candidate. ${endReason}`,
+      RUNNING_SUMMARY_MAX_LEN,
+    );
+  }
+
+  doc.status = "completed";
   await doc.save();
 
   const populated = await Interview.findById(doc._id)
@@ -610,15 +1062,7 @@ export async function startInterviewByRoomForCandidate(actor, rawRoomId) {
 
   return {
     interview: toPublicInterview(populated, { includeResume: false }),
-    initialPromptPayload: initialPayload,
-    finalPrompt: buildGeminiPromptText(initialPayload),
-    promptMeta: {
-      interviewType: template.interviewType,
-      basePromptKey: template.key,
-      basePromptVersion: template.version,
-      maxQuestions: template.maxQuestions,
-      allowedTopics: template.allowedTopics,
-    },
+    ended: true,
   };
 }
 
@@ -705,6 +1149,7 @@ export async function createInterview(actor, body) {
       abusiveLanguageCount: 0,
       cheatingSignalCount: 0,
       quitIntentCount: 0,
+      interviewer: null,
       integrityEvents: [],
       initialPromptPayload: null,
       currentPromptPayload: null,
@@ -928,5 +1373,162 @@ export async function recordInterviewTurnResult(
       warningToCandidate: policyResult.policy.warningToCandidate,
       suspendReason: populated.suspendedReason || "",
     },
+  };
+}
+
+export async function processCandidateTurnByRoom(actor, rawRoomId, body) {
+  const doc = await getCandidateInterviewByRoom(actor, rawRoomId);
+  if (doc.status === "completed") {
+    throw new HttpError(409, "This interview is already completed");
+  }
+
+  const template = await getPromptTemplateByVersion(
+    doc.interviewType,
+    doc.basePromptVersion,
+  );
+  ensureRuntimeStateDefaults(doc, template);
+  const hadPersistedInterviewer = Boolean(
+    normalizeInterviewerProfile(doc.runtimeState?.interviewer)?.id,
+  );
+  const selectedInterviewer = await resolveInterviewerProfileForInterview(doc);
+
+  let answerText = sanitizeText(body?.answerText, ANSWER_MAX_LEN);
+  const answerAudioBase64 = sanitizeText(body?.answerAudioBase64, 50 * 1024 * 1024);
+  const answerAudioMimeType = sanitizeText(body?.answerAudioMimeType, 100) || "audio/webm";
+  const forceNextQuestion = Boolean(body?.forceNextQuestion);
+
+  if (!answerText && answerAudioBase64) {
+    const transcript = await elevenLabsSpeechToText({
+      audioBase64: answerAudioBase64,
+      mimeType: answerAudioMimeType,
+      languageCode: sanitizeText(body?.languageCode, 10),
+    });
+    answerText = sanitizeText(transcript, ANSWER_MAX_LEN);
+  }
+
+  const isFirstTurn =
+    Number(doc.runtimeState.currentQuestionNumber || 0) === 0 ||
+    !sanitizeText(doc.runtimeState.lastQuestion, QUESTION_MAX_LEN);
+
+  if (!isFirstTurn && !answerText && !forceNextQuestion) {
+    throw new HttpError(
+      400,
+      "Provide answerText or answerAudioBase64 before requesting next question",
+    );
+  }
+
+  let promptPayload;
+  if (isFirstTurn) {
+    promptPayload =
+      doc.runtimeState.initialPromptPayload ||
+      buildInitialPromptPayload({
+        interview: doc,
+        candidate: doc.candidateId,
+        template,
+      });
+    doc.runtimeState.initialPromptPayload = promptPayload;
+  } else {
+    promptPayload =
+      doc.runtimeState.currentPromptPayload ||
+      buildNextTurnPromptPayload({
+        interview: doc,
+        candidateAnswer: answerText,
+        template,
+      });
+  }
+
+  let aiResponseRaw;
+  try {
+    aiResponseRaw = await callGeminiForJson(buildGeminiPromptText(promptPayload));
+  } catch (err) {
+    aiResponseRaw = fallbackAiResponse(
+      doc.interviewType,
+      err?.message || "Gemini unavailable",
+    );
+  }
+  const aiResponse = normalizeAiResponseShape(aiResponseRaw, doc.interviewType);
+
+  let result;
+  if (isFirstTurn) {
+    doc.runtimeState.currentQuestionNumber = 1;
+    doc.runtimeState.lastCandidateAnswer = "";
+    doc.runtimeState.lastQuestion = aiResponse.nextQuestion.text;
+    doc.runtimeState.askedTopics = addUniqueString(
+      doc.runtimeState.askedTopics,
+      aiResponse.nextQuestion.topic,
+      ASKED_TOPICS_MAX,
+    );
+    if (aiResponse.runningSummaryUpdate) {
+      doc.runtimeState.runningSummary = sanitizeText(
+        aiResponse.runningSummaryUpdate,
+        RUNNING_SUMMARY_MAX_LEN,
+      );
+    }
+    if (doc.status === "scheduled") {
+      doc.status = "in_progress";
+    }
+
+    const nextPayload = buildNextTurnPromptPayload({
+      interview: doc,
+      candidateAnswer: "",
+      template,
+    });
+    doc.runtimeState.currentPromptPayload = nextPayload;
+    doc.runtimeState.promptGeneratedAt = new Date();
+    await doc.save();
+
+    const populated = await Interview.findById(doc._id)
+      .populate("candidateId", "email name avatarUrl")
+      .populate("scheduledById", "email name")
+      .exec();
+
+    result = {
+      interview: toPublicInterview(populated, { includeResume: false }),
+      nextPromptPayload: nextPayload,
+      nextPromptText: buildGeminiPromptText(nextPayload),
+      policyResult: {
+        action: aiResponse?.interviewDecision?.action || "follow_up",
+        suspended: false,
+        warningToCandidate: aiResponse?.policy?.warningToCandidate || "",
+        suspendReason: "",
+      },
+    };
+  } else {
+    if (!hadPersistedInterviewer) {
+      await doc.save();
+    }
+    result = await recordInterviewTurnResult(actor, doc._id, {
+      candidateAnswer: answerText,
+      aiResponse,
+    });
+  }
+
+  const interviewer =
+    normalizeInterviewerProfile(result?.interview?.runtimeState?.interviewer) ||
+    selectedInterviewer ||
+    fallbackInterviewerProfile();
+  const nextQuestionText = sanitizeText(
+    result.interview?.lastQuestion || aiResponse?.nextQuestion?.text,
+    QUESTION_MAX_LEN,
+  );
+  const ttsAudio = await elevenLabsTextToSpeech(nextQuestionText, interviewer.voiceId);
+
+  return {
+    ...result,
+    interviewer: {
+      id: interviewer.id,
+      name: interviewer.name,
+      gender: interviewer.gender,
+      avatarStyle: interviewer.avatarStyle,
+      voiceEnabled: Boolean(interviewer.voiceId),
+    },
+    transcript: answerText || "",
+    question: {
+      topic: aiResponse?.nextQuestion?.topic || "",
+      text: nextQuestionText,
+    },
+    evaluation: aiResponse?.answerEvaluation || null,
+    decision: aiResponse?.interviewDecision || null,
+    audio: ttsAudio,
   };
 }

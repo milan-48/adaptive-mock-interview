@@ -6,6 +6,7 @@ export default function ConfirmDialog({
   open,
   title,
   message,
+  children = null,
   error = "",
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
@@ -27,7 +28,11 @@ export default function ConfirmDialog({
         <h2 id="confirm-dialog-title" className="text-lg font-semibold text-slate-900">
           {title}
         </h2>
-        <p className="mt-2 text-sm leading-relaxed text-slate-600">{message}</p>
+        {children ? (
+          <div className="mt-2 text-sm leading-relaxed text-slate-600">{children}</div>
+        ) : (
+          <p className="mt-2 text-sm leading-relaxed text-slate-600">{message}</p>
+        )}
         {error ? (
           <p className="mt-3 text-sm text-red-600" role="alert">
             {error}
