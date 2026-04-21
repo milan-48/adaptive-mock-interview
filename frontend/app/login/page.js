@@ -7,7 +7,10 @@ import {
   Lock,
   Mail,
   MessageCircle,
+  Mic,
+  PhoneOff,
   UserRound,
+  Video,
   Zap,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -296,15 +299,31 @@ function LoginForm() {
                   src={HERO_IMAGE}
                   alt="Professional using a tablet"
                   fill
-                  className="object-cover object-top"
+                  className="object-cover object-[center_14%]"
                   sizes="(max-width: 1024px) 0px, 50vw"
                   priority
                 />
+                <div
+                  className="pointer-events-none absolute inset-x-0 bottom-3 flex items-center justify-center"
+                  aria-hidden
+                >
+                  <div className="flex items-center gap-2.5 rounded-full bg-black/30 px-3 py-1.5 backdrop-blur-md">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-white">
+                      <Mic className="h-[18px] w-[18px]" strokeWidth={2.2} />
+                    </span>
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-white">
+                      <Video className="h-[18px] w-[18px]" strokeWidth={2.2} />
+                    </span>
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-red-500 text-white shadow-lg shadow-red-500/35">
+                      <PhoneOff className="h-[18px] w-[18px]" strokeWidth={2.2} />
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
 
             <div
-              className="absolute -bottom-3 left-6 flex h-14 w-14 items-center justify-center rounded-full bg-white shadow-lg lg:left-8"
+              className="absolute -bottom-7 left-6 flex h-14 w-14 items-center justify-center rounded-full bg-white shadow-lg lg:left-8"
               style={{ boxShadow: "0 12px 40px rgba(0,0,0,0.15)" }}
             >
               <Zap
