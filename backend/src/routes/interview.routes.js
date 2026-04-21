@@ -25,6 +25,27 @@ interviewRouter.post(
   interviewController.lookupInterviewByRoom,
 );
 
+interviewRouter.post(
+  "/start-by-room",
+  requireAuth(),
+  requireRole("candidate"),
+  interviewController.startInterviewByRoom,
+);
+
+interviewRouter.get(
+  "/mine",
+  requireAuth(),
+  requireRole("candidate"),
+  interviewController.listMyInterviews,
+);
+
+interviewRouter.post(
+  "/:interviewId/turn-result",
+  requireAuth(),
+  requireRole("admin", "staff"),
+  interviewController.recordInterviewTurn,
+);
+
 interviewRouter.get(
   "/:interviewId",
   requireAuth(),

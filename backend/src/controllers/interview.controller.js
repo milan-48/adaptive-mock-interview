@@ -37,6 +37,64 @@ export async function lookupInterviewByRoom(req, res) {
   }
 }
 
+export async function startInterviewByRoom(req, res) {
+  try {
+    const result = await interviewService.startInterviewByRoomForCandidate(
+      req.user,
+      req.body?.roomId,
+    );
+    return res.json(result);
+  } catch (err) {
+    if (err instanceof HttpError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    logger.error("Start interview by room failed", {
+      message: err.message,
+      stack: err.stack,
+    });
+    return res.status(500).json({ error: "Could not start interview" });
+  }
+}
+
+export async function recordInterviewTurn(req, res) {
+  try {
+    const result = await interviewService.recordInterviewTurnResult(
+      req.user,
+      req.params.interviewId,
+      req.body,
+    );
+    return res.json(result);
+  } catch (err) {
+    if (err instanceof HttpError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    logger.error("Record interview turn failed", {
+      message: err.message,
+      stack: err.stack,
+    });
+    return res.status(500).json({ error: "Could not record interview turn" });
+  }
+}
+
+export async function listMyInterviews(req, res) {
+  try {
+    const result = await interviewService.listInterviewsForCandidate(
+      req.user,
+      req.query,
+    );
+    return res.json(result);
+  } catch (err) {
+    if (err instanceof HttpError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    logger.error("List my interviews failed", {
+      message: err.message,
+      stack: err.stack,
+    });
+    return res.status(500).json({ error: "Could not load interviews" });
+  }
+}
+
 export async function listInterviews(req, res) {
   try {
     const result = await interviewService.listInterviews(req.user, req.query);

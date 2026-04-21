@@ -29,8 +29,6 @@ const TYPE_LABEL = {
   technical: "Technical",
   behavioral: "Behavioral",
   system_design: "System design",
-  mixed: "Mixed",
-  other: "Other",
 };
 
 export default function AdminInterviewsPage() {

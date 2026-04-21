@@ -9,8 +9,6 @@ const TYPE_OPTIONS = [
   { value: "technical", label: "Technical" },
   { value: "behavioral", label: "Behavioral" },
   { value: "system_design", label: "System design" },
-  { value: "mixed", label: "Mixed" },
-  { value: "other", label: "Other" },
 ];
 
 const DURATION_PRESETS = [15, 30, 45, 60];
