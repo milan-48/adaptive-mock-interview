@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: "Adaptive Mock Interview",
-  description: "AI-powered adaptive mock interview platform",
+  title: "Interview practice (text)",
+  description: "Generate interview questions and get AI feedback on your written answers",
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
     apple: "/favicon.svg",

@@ -88,7 +88,7 @@ function LoginForm() {
     mode === "candidate" ? "Candidate Login" : "Administrator Login";
   const subtitle =
     mode === "candidate"
-      ? "Sign in to practice interviews and access your candidate dashboard."
+      ? "Sign in for text-only AI interview practice."
       : "Sign in with your administrator credentials to access the admin dashboard.";
 
   return (

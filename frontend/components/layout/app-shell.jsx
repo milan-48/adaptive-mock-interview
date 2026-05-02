@@ -108,12 +108,16 @@ export default function AppShell({
     return p.replace(/\/$/, "") || "/";
   }
 
-  /** Active nav item: exact match, or prefix match for nested routes. `/admin` is candidates only — not active on `/admin/users`. */
+  /**
+   * Active nav item: exact match, or prefix match for nested routes.
+   * `/admin` and `/dashboard` are section roots — only exact match, not every child path
+   * (e.g. `/dashboard/practice-history` must not highlight Practice).
+   */
   function isNavActive(href) {
     const p = normalizePath(pathname);
     const h = normalizePath(href);
     if (p === h) return true;
-    if (h === "/admin") return false;
+    if (h === "/admin" || h === "/dashboard") return false;
     if (h !== "/" && p.startsWith(`${h}/`)) return true;
     return false;
   }

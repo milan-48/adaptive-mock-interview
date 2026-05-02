@@ -107,7 +107,7 @@ export default function AdminCandidatesPage() {
       {!loading && users.length === 0 ? (
         <EmptyState
           title="No candidates found"
-          subtitle="Create your first candidate to start interviews and session tracking."
+          subtitle="Create candidates so they can sign in and use text-only interview practice."
           action={<Button onClick={openCreate}>Create Candidate</Button>}
         />
       ) : null}
