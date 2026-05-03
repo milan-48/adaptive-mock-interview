@@ -1,5 +1,10 @@
-export const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+const raw = String(process.env.NEXT_PUBLIC_API_URL || "").trim();
+
+/**
+ * In production on Vercel, prefer same-origin calls to `/v1/...` so rewrites apply and CORS is avoided.
+ * In local dev, default to the Express server on 3001.
+ */
+export const API_URL = raw || (process.env.NODE_ENV === "development" ? "http://localhost:3001" : "");
 
 const TOKEN_KEY = "ami_auth_token";
 const TOKEN_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
