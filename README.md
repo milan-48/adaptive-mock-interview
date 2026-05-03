@@ -59,7 +59,7 @@ The repository contains **two deployable parts**: a **Next.js** frontend (`front
 2. **CORS and www vs apex** — Registered **both** origins in backend CORS env and used a **canonical `www`** URL to avoid split sessions.  
 3. **MongoDB Atlas network access** — Vercel uses **dynamic egress IPs**; allowed **`0.0.0.0/0`** in Atlas IP Access so serverless functions can connect (credentials still required).  
 4. **Login POST returning 405** — Edge middleware was redirecting **`/v1/*`** to `/login`; fixed by **excluding `/v1/*`** from page redirects so JSON API requests are not turned into HTML navigation.  
-5. **Gemini quotas / model availability** — Implemented **fallback models** and clear **502** error messages when quota or model errors occur.
+5. **Gemini quotas** — Single model (`gemini-2.0-flash`); clear **502** messages on quota / rate limit.
 
 ---
 
@@ -73,7 +73,7 @@ The repository contains **two deployable parts**: a **Next.js** frontend (`front
 | Server-side AI; key not in browser | Gemini called only from Express; **`GEMINI_API_KEY`** in Vercel **backend** env only. |
 | Contextual AI feature | Interview-specific question generation, per-answer coaching, session summary — not a generic chatbot. |
 | Custom prompts | Authored in backend services (`practiceInterview.service.js`). |
-| Graceful errors | JSON **`{ error: "…" }`**; UI shows message; Gemini helper handles quota / fallbacks. |
+| Graceful errors | JSON **`{ error: "…" }`**; UI shows message; Gemini helper surfaces quota errors clearly. |
 | Routing / “web server” analogy | Hostname routing on Vercel + **Next.js rewrites** for `/v1` (similar intent to Nginx `proxy_pass`). |
 
 ---
