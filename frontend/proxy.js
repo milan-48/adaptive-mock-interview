@@ -16,9 +16,20 @@ function isStaffRole(role) {
   return role === "admin" || role === "staff";
 }
 
+function isV1ApiPath(pathname) {
+  return pathname === "/v1" || pathname.startsWith("/v1/");
+}
+
 export function proxy(request) {
   const token = request.cookies.get("ami_auth_token")?.value;
   const { pathname } = request.nextUrl;
+
+  // Same-origin `/v1/*` is rewritten to the backend. Never redirect these to `/login`:
+  // unauthenticated `POST /v1/auth/login` was becoming a redirect → POST `/login` → 405.
+  // The API returns JSON 401/403/503 as appropriate.
+  if (isV1ApiPath(pathname)) {
+    return NextResponse.next();
+  }
 
   const isPublicLogin = pathname === "/login";
   const isHome = pathname === "/";
