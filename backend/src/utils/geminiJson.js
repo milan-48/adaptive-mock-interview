@@ -4,11 +4,27 @@ import logger from "./logger.js";
 /** Fixed model for generateContent (no fallbacks, env overrides ignored). */
 export const GEMINI_MODEL_ID = "gemini-2.0-flash";
 
+const MAX_GENERATION_ATTEMPTS = 3;
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** True when Google indicates quota / RPM limits (not every 403/400). */
+/** Parses "Please retry in 50.59s" from Google error text; returns ms capped for serverless. */
+function backoffMsFromGoogleMessage(message, httpStatus) {
+  const msg = String(message || "");
+  const m = msg.match(/retry in ([\d.]+)\s*s/i);
+  if (m) {
+    const sec = parseFloat(m[1]);
+    if (Number.isFinite(sec) && sec > 0) {
+      return Math.min(Math.ceil(sec * 1000), 65_000);
+    }
+  }
+  if (httpStatus === 429) return 2800;
+  return 0;
+}
+
+/** True when Google indicates quota / RPM limits. */
 function isLikelyQuotaIssue(payload, httpStatus) {
   const st = String(payload?.error?.status || "").toUpperCase();
   const msg = String(payload?.error?.message || "").toLowerCase();
@@ -30,14 +46,19 @@ function formatFailureMessage(payload, httpStatus) {
   const core =
     googleMsg || `Gemini API returned HTTP ${httpStatus} (no message body)`;
 
-  if (isLikelyQuotaIssue(payload, httpStatus)) {
-    return `${core} — For sustained use: attach billing to the Google Cloud project linked to your API key (Google AI Studio → project → Billing), or wait for free-tier daily/monthly resets. https://ai.google.dev/gemini-api/docs/rate-limits`;
+  if (!isLikelyQuotaIssue(payload, httpStatus)) {
+    const hint =
+      " Verify GEMINI_API_KEY in Vercel (Production), redeploy, no spaces/newlines. In Google Cloud Console: enable “Generative Language API” for the same project as the key.";
+    return `${core}.${hint}`;
   }
 
-  const hint =
-    " Verify GEMINI_API_KEY in Vercel (Production), redeploy, no spaces/newlines. In Google Cloud Console: enable “Generative Language API” for the same project as the key; keys from AI Studio must stay tied to that project.";
+  // Error text like "limit: 0" for free_tier_* means no free quota left for this model/project.
+  const limitZero = /limit:\s*0/i.test(googleMsg);
+  if (limitZero) {
+    return `${core} — Free-tier metrics show limit 0 for this model: enable a billing account on the Google Cloud project that owns this API key (Console → Billing). Paid quotas apply after billing is linked. https://ai.google.dev/gemini-api/docs/rate-limits`;
+  }
 
-  return `${core}.${hint}`;
+  return `${core} — For sustained traffic: enable billing on that Cloud project, or wait for free-tier resets. https://ai.google.dev/gemini-api/docs/rate-limits`;
 }
 
 function safeJsonParse(raw) {
@@ -99,34 +120,51 @@ export async function callGeminiForJson(promptText) {
     },
   });
 
-  let { res, payload } = await generateContentOnce(url, bodyString);
+  let lastRes = null;
+  let lastPayload = null;
 
-  // One retry helps transient 429 / overload bursts on free tier.
-  if (!res.ok && res.status === 429) {
-    logger.warn("Gemini returned 429; retrying once after delay", {
-      modelId,
-    });
-    await sleep(2800);
-    ({ res, payload } = await generateContentOnce(url, bodyString));
+  for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt++) {
+    const { res, payload } = await generateContentOnce(url, bodyString);
+    lastRes = res;
+    lastPayload = payload;
+
+    if (res.ok) {
+      const text =
+        payload?.candidates?.[0]?.content?.parts
+          ?.map((p) => p?.text || "")
+          .join("\n")
+          .trim() || "";
+      const parsed = extractJsonObject(text);
+      if (!parsed || typeof parsed !== "object") {
+        throw new HttpError(502, "Gemini response was not valid JSON");
+      }
+      return parsed;
+    }
+
+    const googleMsg = String(payload?.error?.message || "");
+    const waitMs = backoffMsFromGoogleMessage(googleMsg, res.status);
+
+    if (attempt < MAX_GENERATION_ATTEMPTS && waitMs > 0) {
+      logger.warn("Gemini generateContent failed; retrying after backoff", {
+        modelId,
+        attempt,
+        httpStatus: res.status,
+        waitMs,
+      });
+      await sleep(waitMs);
+      continue;
+    }
+
+    break;
   }
 
-  if (!res.ok) {
-    logger.warn("Gemini generateContent failed", {
-      modelId,
-      httpStatus: res.status,
-      googleError: payload?.error || payload,
-    });
-    throw new HttpError(502, formatFailureMessage(payload, res.status));
-  }
-
-  const text =
-    payload?.candidates?.[0]?.content?.parts
-      ?.map((p) => p?.text || "")
-      .join("\n")
-      .trim() || "";
-  const parsed = extractJsonObject(text);
-  if (!parsed || typeof parsed !== "object") {
-    throw new HttpError(502, "Gemini response was not valid JSON");
-  }
-  return parsed;
+  logger.warn("Gemini generateContent failed", {
+    modelId,
+    httpStatus: lastRes?.status,
+    googleError: lastPayload?.error || lastPayload,
+  });
+  throw new HttpError(
+    502,
+    formatFailureMessage(lastPayload || {}, lastRes?.status || 0),
+  );
 }
