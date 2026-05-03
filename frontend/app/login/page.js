@@ -35,13 +35,15 @@ function LoginForm() {
   const router = useRouter();
   const { login, logout } = useAuth();
 
-  const mode = searchParams.get("tab") === "admin" ? "admin" : "candidate";
+  /** Default tab is Administrator; use `?tab=candidate` for the candidate login. */
+  const mode =
+    searchParams.get("tab") === "candidate" ? "candidate" : "admin";
 
   const [email, setEmail] = useState(() =>
-    searchParams.get("tab") === "admin" ? DEMO_ADMIN_EMAIL : "",
+    searchParams.get("tab") === "candidate" ? "" : DEMO_ADMIN_EMAIL,
   );
   const [password, setPassword] = useState(() =>
-    searchParams.get("tab") === "admin" ? DEMO_ADMIN_PASSWORD : "",
+    searchParams.get("tab") === "candidate" ? "" : DEMO_ADMIN_PASSWORD,
   );
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
@@ -66,7 +68,7 @@ function LoginForm() {
 
   function goAdmin() {
     setError("");
-    router.replace("/login?tab=admin", { scroll: false });
+    router.replace("/login", { scroll: false });
   }
 
   async function onSubmit(e) {
