@@ -1,21 +1,43 @@
 import { HttpError } from "./httpError.js";
+import logger from "./logger.js";
 
 /** Fixed model for generateContent (no fallbacks, env overrides ignored). */
 export const GEMINI_MODEL_ID = "gemini-2.0-flash";
 
-function isQuotaOrOverload(payload, status) {
-  const msg = String(payload?.error?.message || "").toLowerCase();
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** True when Google indicates quota / RPM limits (not every 403/400). */
+function isLikelyQuotaIssue(payload, httpStatus) {
   const st = String(payload?.error?.status || "").toUpperCase();
-  if (status === 429) return true;
+  const msg = String(payload?.error?.message || "").toLowerCase();
+  if (httpStatus === 429) return true;
   if (st === "RESOURCE_EXHAUSTED") return true;
   if (
     msg.includes("quota") ||
     msg.includes("rate limit") ||
-    msg.includes("resource exhausted")
+    msg.includes("resource exhausted") ||
+    msg.includes("too many requests")
   ) {
     return true;
   }
   return false;
+}
+
+function formatFailureMessage(payload, httpStatus) {
+  const googleMsg = String(payload?.error?.message || "").trim();
+  const core =
+    googleMsg || `Gemini API returned HTTP ${httpStatus} (no message body)`;
+
+  if (isLikelyQuotaIssue(payload, httpStatus)) {
+    return `${core} — For sustained use: attach billing to the Google Cloud project linked to your API key (Google AI Studio → project → Billing), or wait for free-tier daily/monthly resets. https://ai.google.dev/gemini-api/docs/rate-limits`;
+  }
+
+  const hint =
+    " Verify GEMINI_API_KEY in Vercel (Production), redeploy, no spaces/newlines. In Google Cloud Console: enable “Generative Language API” for the same project as the key; keys from AI Studio must stay tied to that project.";
+
+  return `${core}.${hint}`;
 }
 
 function safeJsonParse(raw) {
@@ -48,6 +70,16 @@ export function extractJsonObject(raw) {
   return null;
 }
 
+async function generateContentOnce(url, bodyString) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: bodyString,
+  });
+  const payload = await res.json().catch(() => ({}));
+  return { res, payload };
+}
+
 export async function callGeminiForJson(promptText) {
   const key = String(process.env.GEMINI_API_KEY || "").trim();
   if (!key) {
@@ -59,30 +91,32 @@ export async function callGeminiForJson(promptText) {
     modelId,
   )}:generateContent?key=${encodeURIComponent(key)}`;
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: promptText }] }],
-      generationConfig: {
-        temperature: 0.35,
-        responseMimeType: "application/json",
-      },
-    }),
+  const bodyString = JSON.stringify({
+    contents: [{ role: "user", parts: [{ text: promptText }] }],
+    generationConfig: {
+      temperature: 0.35,
+      responseMimeType: "application/json",
+    },
   });
 
-  const payload = await res.json().catch(() => ({}));
-  const lastMessage =
-    payload?.error?.message || `Gemini API error (${res.status})`;
+  let { res, payload } = await generateContentOnce(url, bodyString);
+
+  // One retry helps transient 429 / overload bursts on free tier.
+  if (!res.ok && res.status === 429) {
+    logger.warn("Gemini returned 429; retrying once after delay", {
+      modelId,
+    });
+    await sleep(2800);
+    ({ res, payload } = await generateContentOnce(url, bodyString));
+  }
 
   if (!res.ok) {
-    if (isQuotaOrOverload(payload, res.status)) {
-      throw new HttpError(
-        502,
-        `Gemini quota or rate limit on ${modelId}. Enable billing or wait for reset. See https://ai.google.dev/gemini-api/docs/rate-limits`,
-      );
-    }
-    throw new HttpError(502, lastMessage);
+    logger.warn("Gemini generateContent failed", {
+      modelId,
+      httpStatus: res.status,
+      googleError: payload?.error || payload,
+    });
+    throw new HttpError(502, formatFailureMessage(payload, res.status));
   }
 
   const text =
