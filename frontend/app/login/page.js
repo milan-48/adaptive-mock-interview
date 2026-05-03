@@ -14,10 +14,14 @@ import {
   Zap,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useAuth } from "@/context/auth-context";
 
 const PRIMARY = "#0061FF";
+
+/** Pre-filled on the Administrator tab for instructor / reviewer demos (not secret). */
+const DEMO_ADMIN_EMAIL = "admin@gmail.com";
+const DEMO_ADMIN_PASSWORD = "Fd123";
 
 const HERO_IMAGE =
   "https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=1200&q=80";
@@ -33,11 +37,25 @@ function LoginForm() {
 
   const mode = searchParams.get("tab") === "admin" ? "admin" : "candidate";
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState(() =>
+    searchParams.get("tab") === "admin" ? DEMO_ADMIN_EMAIL : "",
+  );
+  const [password, setPassword] = useState(() =>
+    searchParams.get("tab") === "admin" ? DEMO_ADMIN_PASSWORD : "",
+  );
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (mode === "admin") {
+      setEmail(DEMO_ADMIN_EMAIL);
+      setPassword(DEMO_ADMIN_PASSWORD);
+    } else {
+      setEmail("");
+      setPassword("");
+    }
+  }, [mode]);
 
   function goCandidate() {
     setError("");
@@ -151,6 +169,19 @@ function LoginForm() {
             <p className="mt-2 text-sm leading-relaxed text-zinc-500">
               {subtitle}
             </p>
+
+            {mode === "admin" ? (
+              <div
+                className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-relaxed text-blue-900"
+                role="note"
+              >
+                <span className="font-semibold text-blue-950">
+                  Note for reviewers:
+                </span>{" "}
+                Demo administrator credentials are pre-filled below so you can
+                sign in and check the admin dashboard.
+              </div>
+            ) : null}
 
             <form onSubmit={onSubmit} className="mt-8 flex flex-col gap-5">
               <div>
