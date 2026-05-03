@@ -9,11 +9,13 @@ function geminiModelCandidates() {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+  // Only models known to support generateContent on the Gemini Developer API (v1beta).
+  // Avoid deprecated IDs (e.g. gemini-1.5-flash-8b returns "not found" for many keys).
   const defaults = [
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-8b",
+    "gemini-2.0-flash-lite",
+    "gemini-2.0-flash",
   ];
   const ordered = [primary, ...extra, ...defaults];
   return [...new Set(ordered)];
@@ -36,6 +38,13 @@ function isQuotaOrOverload(payload, status) {
 
 function shouldTryNextModel(payload, status) {
   if (status === 404) return true;
+  const msg = String(payload?.error?.message || "").toLowerCase();
+  if (
+    msg.includes("not found") ||
+    (msg.includes("not supported") && msg.includes("generatecontent"))
+  ) {
+    return true;
+  }
   return isQuotaOrOverload(payload, status);
 }
 
