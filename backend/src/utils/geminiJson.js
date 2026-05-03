@@ -1,8 +1,26 @@
 import { HttpError } from "./httpError.js";
 import logger from "./logger.js";
 
-/** Fixed model for generateContent (no fallbacks, env overrides ignored). */
+/**
+ * Primary model (also exported for callers). Model is not read from env —
+ * on 429 / quota exhaustion we walk {@link GENERATE_CONTENT_MODEL_CHAIN}.
+ */
 export const GEMINI_MODEL_ID = "gemini-2.0-flash";
+
+/**
+ * Ordered fallbacks for the same Google Cloud project / API key.
+ * Align with AI Studio “Rate limits by model”: when Gemini 2 Flash is saturated,
+ * lighter Gemini models or Gemma often still have separate RPM/RPD headroom.
+ * If an ID 404s for your key, remove it from this list.
+ */
+const GENERATE_CONTENT_MODEL_CHAIN = [
+  GEMINI_MODEL_ID,
+  "gemini-2.5-flash-lite",
+  "gemini-1.5-flash",
+  // Gemma on Gemini API (see https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api)
+  "gemma-4-26b-a4b-it",
+  "gemma-4-31b-it",
+];
 
 const MAX_GENERATION_ATTEMPTS = 3;
 
@@ -22,6 +40,19 @@ function backoffMsFromGoogleMessage(message, httpStatus) {
   }
   if (httpStatus === 429) return 2800;
   return 0;
+}
+
+function shouldTryNextModelForQuota(payload, httpStatus) {
+  if (httpStatus === 429) return true;
+  const st = String(payload?.error?.status || "").toUpperCase();
+  if (st === "RESOURCE_EXHAUSTED") return true;
+  const msg = String(payload?.error?.message || "").toLowerCase();
+  return (
+    msg.includes("quota") ||
+    msg.includes("rate limit") ||
+    msg.includes("resource exhausted") ||
+    msg.includes("too many requests")
+  );
 }
 
 /** True when Google indicates quota / RPM limits. */
@@ -107,11 +138,6 @@ export async function callGeminiForJson(promptText) {
     throw new HttpError(503, "GEMINI_API_KEY is not configured");
   }
 
-  const modelId = GEMINI_MODEL_ID;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-    modelId,
-  )}:generateContent?key=${encodeURIComponent(key)}`;
-
   const bodyString = JSON.stringify({
     contents: [{ role: "user", parts: [{ text: promptText }] }],
     generationConfig: {
@@ -122,44 +148,73 @@ export async function callGeminiForJson(promptText) {
 
   let lastRes = null;
   let lastPayload = null;
+  let lastModelId = GENERATE_CONTENT_MODEL_CHAIN[0];
 
-  for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt++) {
-    const { res, payload } = await generateContentOnce(url, bodyString);
-    lastRes = res;
-    lastPayload = payload;
+  modelLoop: for (let mi = 0; mi < GENERATE_CONTENT_MODEL_CHAIN.length; mi++) {
+    const modelId = GENERATE_CONTENT_MODEL_CHAIN[mi];
+    lastModelId = modelId;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      modelId,
+    )}:generateContent?key=${encodeURIComponent(key)}`;
 
-    if (res.ok) {
-      const text =
-        payload?.candidates?.[0]?.content?.parts
-          ?.map((p) => p?.text || "")
-          .join("\n")
-          .trim() || "";
-      const parsed = extractJsonObject(text);
-      if (!parsed || typeof parsed !== "object") {
-        throw new HttpError(502, "Gemini response was not valid JSON");
+    for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt++) {
+      const { res, payload } = await generateContentOnce(url, bodyString);
+      lastRes = res;
+      lastPayload = payload;
+
+      if (res.ok) {
+        const text =
+          payload?.candidates?.[0]?.content?.parts
+            ?.map((p) => p?.text || "")
+            .join("\n")
+            .trim() || "";
+        const parsed = extractJsonObject(text);
+        if (!parsed || typeof parsed !== "object") {
+          throw new HttpError(502, "Gemini response was not valid JSON");
+        }
+        if (modelId !== GEMINI_MODEL_ID) {
+          logger.info("Gemini generateContent ok (fallback model)", {
+            modelId,
+            primaryModel: GEMINI_MODEL_ID,
+          });
+        }
+        return parsed;
       }
-      return parsed;
+
+      const hasNextModel = mi < GENERATE_CONTENT_MODEL_CHAIN.length - 1;
+      if (hasNextModel && shouldTryNextModelForQuota(payload, res.status)) {
+        logger.warn(
+          "Gemini quota/rate limit hit; trying next model without long backoff",
+          {
+            failedModel: modelId,
+            nextModel: GENERATE_CONTENT_MODEL_CHAIN[mi + 1],
+            httpStatus: res.status,
+          },
+        );
+        continue modelLoop;
+      }
+
+      const googleMsg = String(payload?.error?.message || "");
+      const waitMs = backoffMsFromGoogleMessage(googleMsg, res.status);
+
+      if (attempt < MAX_GENERATION_ATTEMPTS && waitMs > 0) {
+        logger.warn("Gemini generateContent failed; retrying after backoff", {
+          modelId,
+          attempt,
+          httpStatus: res.status,
+          waitMs,
+        });
+        await sleep(waitMs);
+        continue;
+      }
+
+      break;
     }
-
-    const googleMsg = String(payload?.error?.message || "");
-    const waitMs = backoffMsFromGoogleMessage(googleMsg, res.status);
-
-    if (attempt < MAX_GENERATION_ATTEMPTS && waitMs > 0) {
-      logger.warn("Gemini generateContent failed; retrying after backoff", {
-        modelId,
-        attempt,
-        httpStatus: res.status,
-        waitMs,
-      });
-      await sleep(waitMs);
-      continue;
-    }
-
-    break;
   }
 
   logger.warn("Gemini generateContent failed", {
-    modelId,
+    modelId: lastModelId,
+    modelsAttempted: GENERATE_CONTENT_MODEL_CHAIN,
     httpStatus: lastRes?.status,
     googleError: lastPayload?.error || lastPayload,
   });
