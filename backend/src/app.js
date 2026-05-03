@@ -20,16 +20,41 @@ function parseAllowedOrigins() {
   return [...new Set(list)];
 }
 
+function compileSuffixMatchers() {
+  const raw = String(process.env.CORS_ORIGIN_SUFFIXES || "").trim();
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((suffix) => {
+      try {
+        return new RegExp(
+          `^https://([a-z0-9-]+\\.)*${suffix.replace(/\./g, "\\.")}$`,
+          "i",
+        );
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
 export async function createApp() {
   const app = express();
 
   const allowed = parseAllowedOrigins();
+  const suffixMatchers = compileSuffixMatchers();
 
   app.use(
     cors({
       origin(origin, callback) {
         if (!origin) return callback(null, true);
-        return callback(null, allowed.includes(origin));
+        if (allowed.includes(origin)) return callback(null, true);
+        if (suffixMatchers.some((re) => re.test(origin))) {
+          return callback(null, true);
+        }
+        return callback(null, false);
       },
       credentials: true,
       optionsSuccessStatus: 200,
