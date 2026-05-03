@@ -9,7 +9,6 @@ import {
   useState,
 } from "react";
 import {
-  API_URL,
   apiFetch,
   clearStoredToken,
   getStoredToken,
@@ -119,15 +118,10 @@ export function AuthProvider({ children }) {
   }, [refresh]);
 
   const login = useCallback(async (email, password) => {
-    const res = await fetch(`${API_URL}/v1/auth/login`, {
+    const data = await apiFetch("/v1/auth/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || "Login failed");
-    }
     clearImpersonationContext();
     setImpersonation(null);
     setStoredToken(data.token);
@@ -136,15 +130,10 @@ export function AuthProvider({ children }) {
   }, []);
 
   const register = useCallback(async ({ email, password, name }) => {
-    const res = await fetch(`${API_URL}/v1/auth/register`, {
+    const data = await apiFetch("/v1/auth/register", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password, name }),
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || "Registration failed");
-    }
     clearImpersonationContext();
     setImpersonation(null);
     setStoredToken(data.token);
