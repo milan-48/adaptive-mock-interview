@@ -6,6 +6,9 @@ export async function connect() {
   if (!uri) {
     throw new Error("MONGODB_URI is not set");
   }
+  if (mongoose.connection.readyState === 1) {
+    return;
+  }
   mongoose.set("strictQuery", true);
   await mongoose.connect(uri);
   logger.info("MongoDB connection established");

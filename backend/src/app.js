@@ -48,7 +48,25 @@ export async function createApp() {
   /** Liveness: must not depend on Mongo (Vercel health checks, debugging). */
   app.use("/v1/health", healthRouter);
 
-  await connect();
+  /** DB required for all API routes except health (avoid crashing serverless cold starts). */
+  app.use(async (req, res, next) => {
+    if (req.path === "/v1/health" || req.path.startsWith("/v1/health/")) {
+      return next();
+    }
+    try {
+      await connect();
+      return next();
+    } catch (err) {
+      logger.error("Database connection failed", {
+        message: err.message,
+        stack: err.stack,
+      });
+      return res.status(503).json({
+        error:
+          "Database unavailable. Set MONGODB_URI on the server (check Vercel env vars).",
+      });
+    }
+  });
 
   app.use("/", indexRouter);
 
